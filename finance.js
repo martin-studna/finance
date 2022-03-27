@@ -55,12 +55,12 @@ var fin = new (function () {
   this.config = PropertiesService.getScriptProperties()
 
   this.emptyDbSheet = function () {
-    var template = SpreadsheetApp.openById("1pj6zDR6Bh2Zg5DTMQFfa69yiS4np0WqUceuKsEL7jSA")
+    var template = SpreadsheetApp.openById("1yPaFrqGv1KLLVpGK-h1Y-OAC0qh2cIQjM9YIQQUUWo8")
     return template.getSheetByName("db").copyTo(this.ss).setName("db").activate()
   }
 
   this.emptyBalanceSheet = function () {
-    var template = SpreadsheetApp.openById("1pj6zDR6Bh2Zg5DTMQFfa69yiS4np0WqUceuKsEL7jSA")
+    var template = SpreadsheetApp.openById("1yPaFrqGv1KLLVpGK-h1Y-OAC0qh2cIQjM9YIQQUUWo8")
     return template.getSheetByName("přehled").copyTo(this.ss).setName("přehled")
   }
 
@@ -339,7 +339,7 @@ b, a { font-weight: bold; }\
 </form>\
 <form id="air" onsubmit="google.script.run.finBridge(this);google.script.host.close();">\
   Je potřeba úvest přihlašovací údaje do internetového bankovnictví.<br><br>\
-  <input type="text" placeholder="Uživatelské jméno" name="airUser"><br><br>\
+  <input type="text" placeholder="Token" name="airToken"><br><br>\
   <input type="hidden" name="obj" value="airApi">\
   <input type="hidden" name="func" value="submit">\
   <input type="submit" value="Nastavit"><br><br>\
@@ -367,11 +367,16 @@ var airApi = new (function () {
   this.config = JSON.parse(fin.config.getProperty("air"))
 
   this.submit = function (args) {
-    this.config = { user: args.airUser }
+    this.config = { user: args.airToken }
     fin.config.setProperty("air", JSON.stringify(this.config))
   }
 
-  this.show = function () {
+
+
+/**
+ * Show modal to load transactions from csv 
+ */
+  this.showModalCSV = function () {
     var html =
       '\
 <style>\
@@ -415,7 +420,9 @@ function attachFile() {\
     } catch (e) {}
   }
 
-  this.getLatestTransaction = function () {
+  //
+
+  this.getLatestTransactionFromCsv = function () {
     if (!this.config || !this.config.user) {
       return
     }
@@ -480,6 +487,62 @@ function attachFile() {\
 
     return rows.join("\n")
   }
+
+  this.api = function (arg) {
+    if (!this.token) {
+      return
+    }
+
+    var url = "https://www.fio.cz/ib_api/rest/last/" + this.token + "/" + arg + ".json"
+    var response = UrlFetchApp.fetch(url, { muteHttpExceptions: true })
+
+    if (response.getResponseCode() != 200) {
+      throw "FioApi: Bad token? Or too fast? Got status: " + response.getResponseCode() + "."
+    }
+
+    return JSON.parse(response.getContentText()).accountStatement
+  }
+
+  this.getLatestTransaction = function () {
+    var json = this.api("transactions")
+
+    if (!json || !json.transactionList) {
+      return
+    }
+
+    var list = json.transactionList.transaction
+
+    var trans = []
+
+    for (var i = 0; i < list.length; i++) {
+      var obj = list[i]
+      trans[i] = {}
+
+      for (var key in this.columns) {
+        var val = obj[key]
+        var column = this.columns[key]
+
+        if (!val) {
+          val = ""
+        } else if (column == "Datum") {
+          val = val.value.replace(/\+[0-9]+/, "")
+        } else {
+          val = val.value
+        }
+
+        if (column == "Kód banky" && val) {
+          trans[i]["Protiúčet"] = trans[i]["Protiúčet"] + "/" + val
+          continue
+        }
+
+        trans[i][column] = val
+      }
+    }
+
+    return trans
+  }
+
+
 })()
 
 var fioApi = new (function () {
